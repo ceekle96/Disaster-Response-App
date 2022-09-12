@@ -1,137 +1,96 @@
 import sys
-import nltk
-nltk.download(['punkt', 'wordnet', 'stopwords'])
 
-import pandas as pd
-import numpy as np
 from sqlalchemy import create_engine
-import re
-import pickle
-
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-from nltk.stem import WordNetLemmatizer
-
-from sklearn.pipeline import Pipeline
-from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
+import pandas as pd
 from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.ensemble import RandomForestClassifier, , AdaBoostClassifier
-from sklearn.multioutput import MultiOutputClassifier
-from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import classification_report
+from nltk.stem.wordnet import WordNetLemmatizer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score, make_scorer
+import re
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from nltk.stem.porter import PorterStemmer
+from nltk.stem.wordnet import WordNetLemmatizer
+import nltk
+import numpy as np
+import joblib
+nltk.download('wordnet')  # download for lemmatization
+nltk.download('stopwords')
+nltk.download('punkt')
+from transformation import multi_class_score, tokenize
 
-import warnings
-
-warnings.simplefilter('ignore')
-
-def load_data(database_filepath):
-    """Load and merge messages and categories datasets
+def get_metrics(test_value, predicted_value):
+    """
+    get_metrics calculates f1 score, accuracy and recall
 
     Args:
-    database_filename: string. Filename for SQLite database containing cleaned message data.
+        test_value (list): list of actual values
+        predicted_value (list): list of predicted values
 
     Returns:
-    X: dataframe. Dataframe containing features dataset.
-    Y: dataframe. Dataframe containing labels dataset.
-    category_names: list of strings. List containing category names.
+        dictionray: a dictionary with accuracy, f1 score, precision and recall
     """
-    # Load data from database
-    engine = create_engine('sqlite:///' + database_filepath)
-    df = pd.read_sql("SELECT * FROM Messages", engine)
+    accuracy = accuracy_score(test_value, predicted_value)
+    precision = round(precision_score(
+        test_value, predicted_value, average='micro'))
+    recall = recall_score(test_value, predicted_value, average='micro')
+    f1 = f1_score(test_value, predicted_value, average='micro')
+    return {'Accuracy': accuracy, 'f1 score': f1, 'Precision': precision, 'Recall': recall}
 
-    # Create X and Y datasets
+
+def load_data(database_filepath):
+    # load data from database
+    engine = create_engine('sqlite:///'+database_filepath)
+    df = pd.read_sql_table("message_table", engine)
     X = df['message']
-    Y = df.iloc[:, 4:]
-
-    # Create list containing all category names
-    category_names = list(Y.columns.values)
-
+    Y = df.drop(['id', 'message', 'original', 'genre'], axis=1)
+    category_names = list(Y.columns)
     return X, Y, category_names
 
 
-def tokenize(text):
-    """Normalize, tokenize and stem text string
-
-    Args:
-    text: string. String containing message for processing
-
-    Returns:
-    words: list of strings. List containing word tokens
-    """
-    # Normalize text
-    text = re.sub(r"[^a-zA-Z0-9]", " ", text.lower())
-
-    # tokenize text
-    words = word_tokenize(text)
-
-    # remove stop words
-    stopwords_ = stopwords.words("english")
-    words = [word for word in words if word not in stopwords_]
-
-    # extract root form of words
-    words = [WordNetLemmatizer().lemmatize(word, pos='v') for word in words]
-
-    return words
-
-
 def build_model():
-    """Build a machine learning pipeline
+    # write custom scoring for multiclass classifier
+    # compute bag of word counts and tf-idf values
+    vectorizer = TfidfVectorizer(
+        tokenizer=tokenize, use_idf=True, smooth_idf=True, sublinear_tf=False)
 
-    Args:
-    None
+    # clf = MultiOutputClassifier(RandomForestClassifier(random_state = 42))
+    clf = RandomForestClassifier(random_state=42)
 
-    Returns:
-    cv: gridsearchcv object. Gridsearchcv object that transforms the data, creates the
-    model object and finds the optimal model parameters.
-    """
-    # Create pipeline
-    pipeline = Pipeline([
-        ('vect', CountVectorizer(tokenizer=tokenize)),
-        ('tfidf', TfidfTransformer()),
-        ('clf', MultiOutputClassifier(RandomForestClassifier()))
-    ])
+    pipeline = Pipeline([('vectorizer', vectorizer), ('clf', clf)])
+    score = make_scorer(multi_class_score)
+    parameters = {
+        'clf__criterion': ['gini', 'entropy'],
+        'clf__max_features': ['auto', 'sqrt'],
+        'clf__max_depth': [5, 10, 20, 30, 40],
+        'clf__random_state': [42]}
 
-    # Create parameters dictionary
-    parameters = {'vect__min_df': [1, 5],
-                  'tfidf__use_idf': [True, False],
-                  'clf__estimator__n_estimators': [10, 25],
-                  'clf__estimator__min_samples_split': [2, 5, 10]}
+    cv_rf_tuned = GridSearchCV(pipeline, param_grid=parameters, scoring=score,
+                               n_jobs=-1,
+                               cv=5, refit=True, return_train_score=True, verbose=10)
 
-    # Create grid search object
-    cv = GridSearchCV(pipeline, param_grid=parameters)
-
-    return cv
+    return cv_rf_tuned
 
 
 def evaluate_model(model, X_test, Y_test, category_names):
-    """Returns test accuracy, precision, recall and F1 score for fitted model
+    y_pred_test = model.predict(X_test)
 
-    Args:
-    model: model object. Fitted model object.
-    X_test: dataframe. Dataframe containing test features dataset.
-    Y_test: dataframe. Dataframe containing test labels dataset.
-    category_names: list of strings. List containing category names.
-
-    Returns:
-    None
-    """
-    y_pred = model.predict(X_test)
-    print(classification_report(y_pred, Y_test.values, target_names=category_names))
-    # print raw accuracy score
-    print('Accuracy Score: {}'.format(np.mean(Y_test.values == y_pred)))
+    test_results = []
+    for i, column in enumerate(Y_test.columns):
+        result = get_metrics(Y_test.loc[:, column].values, y_pred_test[:, i])
+        test_results.append(result)
+    test_results_df = pd.DataFrame(test_results)
+    print("Result for Each Category")
+    print(test_results_df)
+    print("Overall Evaluation Result")
+    print(test_results_df.mean())
 
 
 def save_model(model, model_filepath):
-    """Pickle fitted model
-
-    Args:
-    model: model object. Fitted model object.
-    model_filepath: string. Filepath for where fitted model should be saved
-
-    Returns:
-    None
-    """
-    pickle.dump(model.best_estimator_, open(model_filepath, 'wb'))
+    model = model.best_estimator_
+    joblib.dump(model, model_filepath)
 
 
 def main():
@@ -139,14 +98,15 @@ def main():
         database_filepath, model_filepath = sys.argv[1:]
         print('Loading data...\n    DATABASE: {}'.format(database_filepath))
         X, Y, category_names = load_data(database_filepath)
-        X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
-        
+        X_train, X_test, Y_train, Y_test = train_test_split(
+            X, Y, test_size=0.2)
+
         print('Building model...')
         model = build_model()
-        
+
         print('Training model...')
         model.fit(X_train, Y_train)
-        
+
         print('Evaluating model...')
         evaluate_model(model, X_test, Y_test, category_names)
 
@@ -156,9 +116,9 @@ def main():
         print('Trained model saved!')
 
     else:
-        print('Please provide the filepath of the disaster messages database '\
-              'as the first argument and the filepath of the pickle file to '\
-              'save the model to as the second argument. \n\nExample: python '\
+        print('Please provide the filepath of the disaster messages database '
+              'as the first argument and the filepath of the pickle file to '
+              'save the model to as the second argument. \n\nExample: python '
               'train_classifier.py ../data/DisasterResponse.db classifier.pkl')
 
 

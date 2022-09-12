@@ -8,30 +8,19 @@ from nltk.tokenize import word_tokenize
 from flask import Flask
 from flask import render_template, request, jsonify
 from plotly.graph_objs import Bar
-from sklearn.externals import joblib
 from sqlalchemy import create_engine
-
+import joblib
+from transformation import tokenize,multi_class_score
+# from ../models/transformation import tokenize,multi_class_score
 
 app = Flask(__name__)
 
-def tokenize(text):
-    tokens = word_tokenize(text)
-    lemmatizer = WordNetLemmatizer()
-
-    clean_tokens = []
-    for tok in tokens:
-        clean_tok = lemmatizer.lemmatize(tok).lower().strip()
-        clean_tokens.append(clean_tok)
-
-    return clean_tokens
-
 # load data
-engine = create_engine('sqlite:///../data/YourDatabaseName.db')
-df = pd.read_sql_table('YourTableName', engine)
+engine = create_engine('sqlite:///../data/DisasterResponse.db')
+df = pd.read_sql_table('message_table', engine)
 
 # load model
-model = joblib.load("../models/your_model_name.pkl")
-
+model = joblib.load("../models/classifier.pkl")
 
 # index webpage displays cool visuals and receives user input text for model
 @app.route('/')
@@ -42,7 +31,11 @@ def index():
     # TODO: Below is an example - modify to extract data for your own visuals
     genre_counts = df.groupby('genre').count()['message']
     genre_names = list(genre_counts.index)
-    
+   
+
+    Y = df.drop(['id', 'message', 'original', 'genre'], axis = 1)
+    top_response_counts = Y.sum(axis=0).sort_values(ascending=False)[:10]
+    top_response_names = list(top_response_counts.index)
     # create visuals
     # TODO: Below is an example - modify to create your own visuals
     graphs = [
@@ -50,7 +43,7 @@ def index():
             'data': [
                 Bar(
                     x=genre_names,
-                    y=genre_counts
+                    y=list(genre_counts)
                 )
             ],
 
@@ -61,6 +54,25 @@ def index():
                 },
                 'xaxis': {
                     'title': "Genre"
+                }
+            }
+        },
+
+         {
+            'data': [
+                Bar(
+                    x=top_response_names,
+                    y=list(top_response_counts)
+                )
+            ],
+
+            'layout': {
+                'title': 'Top 10 Responses',
+                'yaxis': {
+                    'title': "Count"
+                },
+                'xaxis': {
+                    'title': "Response"
                 }
             }
         }
@@ -83,7 +95,6 @@ def go():
     # use model to predict classification for query
     classification_labels = model.predict([query])[0]
     classification_results = dict(zip(df.columns[4:], classification_labels))
-
     # This will render the go.html Please see that file. 
     return render_template(
         'go.html',
@@ -93,6 +104,7 @@ def go():
 
 
 def main():
+    
     app.run(host='0.0.0.0', port=3001, debug=True)
 
 
