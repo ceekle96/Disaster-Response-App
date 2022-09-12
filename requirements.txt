@@ -3,13 +3,6 @@ Jinja2
 joblib
 json5
 jsonschema
-jupyter
-jupyter-client
-jupyter-console
-jupyter-core
-jupyterlab
-jupyterlab-server
-kiwisolver
 matplotlib
 nltk
 numpy
@@ -23,8 +16,6 @@ SQLAlchemy
 torch
 tqdm
 urllib3
-webencodings
 Werkzeug
 xgboost
-zipp
 gunicorn
