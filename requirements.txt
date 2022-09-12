@@ -27,3 +27,4 @@ webencodings
 Werkzeug
 xgboost
 zipp
+gunicorn
