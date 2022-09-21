@@ -1,4 +1,5 @@
-
+import bz2file as bz2
+import pickle
 import re
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
@@ -6,8 +7,6 @@ from nltk.stem.porter import PorterStemmer
 from nltk.stem.wordnet import WordNetLemmatizer
 from sklearn.metrics import accuracy_score
 import numpy as np
-import bz2file as bz2
-import pickle
 
 
 def tokenize(text):
