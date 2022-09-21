@@ -4,8 +4,12 @@ from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem.porter import PorterStemmer
 from nltk.stem.wordnet import WordNetLemmatizer
-from sklearn.metrics import  accuracy_score
+from sklearn.metrics import accuracy_score
 import numpy as np
+import bz2file as bz2
+import pickle
+
+
 def tokenize(text):
     # Normalize text
     text = re.sub(r"[^a-zA-Z0-9]", " ", text.lower())
@@ -26,3 +30,16 @@ def multi_class_score(y_true, y_pred):
         accuracy_results.append(accuracy)
     avg_accuracy = np.mean(accuracy_results)
     return avg_accuracy
+
+
+def compressed_pickle(title, data):
+
+    with bz2.BZ2File(title + ".pbz2", "w") as f:
+        pickle.dump(data, f)
+
+
+def decompress_pickle(file):
+
+    data = bz2.BZ2File(file, "rb")
+    data = pickle.load(data)
+    return data
